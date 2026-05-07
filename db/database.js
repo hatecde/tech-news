@@ -1,0 +1,179 @@
+const Database = require('better-sqlite3');
+const path     = require('path');
+const fs       = require('fs');
+
+const DATA_DIR      = path.join(__dirname, '..', 'data');
+const GENERATED_DIR = path.join(DATA_DIR, 'generated-images');
+const DB_PATH       = path.join(DATA_DIR, 'news.db');
+
+let db;
+
+const SOURCES = [
+  { name: 'The Verge',        slug: 'the-verge',        url: 'https://www.theverge.com/rss/index.xml' },
+  { name: 'TechCrunch',       slug: 'techcrunch',       url: 'https://techcrunch.com/feed/' },
+  { name: 'Engadget',         slug: 'engadget',         url: 'https://www.engadget.com/rss.xml' },
+  { name: 'PC Gamer',         slug: 'pc-gamer',         url: 'https://www.pcgamer.com/rss/' },
+];
+
+function initializeDb() {
+  // Ensure the data directory exists
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(GENERATED_DIR)) {
+    fs.mkdirSync(GENERATED_DIR, { recursive: true });
+  }
+
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');  // Better concurrent read performance
+  db.pragma('foreign_keys = ON');
+
+  // Create tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sources (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL UNIQUE,
+      url             TEXT    NOT NULL,
+      slug            TEXT    NOT NULL UNIQUE,
+      last_fetched_at TEXT    DEFAULT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS articles (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id    INTEGER NOT NULL REFERENCES sources(id),
+      title        TEXT    NOT NULL,
+      url          TEXT    NOT NULL UNIQUE,
+      description  TEXT,
+      content_html TEXT,
+      content_text TEXT,
+      image_url    TEXT,
+      published_at TEXT,
+      fetched_at   TEXT    NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_articles_source_id
+      ON articles(source_id);
+    CREATE INDEX IF NOT EXISTS idx_articles_published_at
+      ON articles(published_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_articles_url
+      ON articles(url);
+  `);
+
+  ensureColumn('articles', 'generated_image_url', 'TEXT');
+  ensureColumn('articles', 'generated_image_status', 'TEXT');
+  ensureColumn('articles', 'generated_image_generated_at', 'TEXT');
+  ensureColumn('articles', 'preview_text', 'TEXT');
+  ensureColumn('articles', 'preview_fetched_at', 'TEXT');
+  ensureColumn('articles', 'content_html', 'TEXT');
+  ensureColumn('articles', 'content_text', 'TEXT');
+
+  syncSources();
+  console.log('[db] Initialized:', DB_PATH);
+}
+
+function ensureColumn(tableName, columnName, sqlType) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const exists = columns.some((column) => column.name === columnName);
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${sqlType}`);
+  }
+}
+
+function syncSources() {
+  const configuredSlugs = new Set(SOURCES.map((source) => source.slug));
+  const existingSources = db.prepare(`
+    SELECT id, slug
+    FROM sources
+  `).all();
+
+  const obsoleteSources = existingSources.filter((source) => !configuredSlugs.has(source.slug));
+
+  const sync = db.transaction(() => {
+    if (obsoleteSources.length > 0) {
+      const deleteArticlesBySource = db.prepare(`
+        DELETE FROM articles
+        WHERE source_id = ?
+      `);
+      const deleteSource = db.prepare(`
+        DELETE FROM sources
+        WHERE id = ?
+      `);
+
+      for (const source of obsoleteSources) {
+        removeGeneratedImagesForSource(source.id);
+        deleteArticlesBySource.run(source.id);
+        deleteSource.run(source.id);
+      }
+    }
+
+    const upsertSource = db.prepare(`
+      INSERT INTO sources (name, url, slug)
+      VALUES (@name, @url, @slug)
+      ON CONFLICT(slug) DO UPDATE SET
+        name = excluded.name,
+        url = excluded.url
+    `);
+
+    for (const source of SOURCES) {
+      upsertSource.run(source);
+    }
+  });
+
+  sync();
+}
+
+function removeGeneratedImagesForSource(sourceId) {
+  const hasGeneratedColumn = db.prepare(`PRAGMA table_info(articles)`).all()
+    .some((column) => column.name === 'generated_image_url');
+
+  if (!hasGeneratedColumn) return;
+
+  const generated = db.prepare(`
+    SELECT generated_image_url
+    FROM articles
+    WHERE source_id = ?
+      AND generated_image_url IS NOT NULL
+  `).all(sourceId);
+
+  for (const row of generated) {
+    const filename = row.generated_image_url?.split('/').pop();
+    if (!filename) continue;
+
+    const absolutePath = path.join(GENERATED_DIR, filename);
+    if (fs.existsSync(absolutePath)) {
+      fs.unlinkSync(absolutePath);
+    }
+  }
+}
+
+// Bulk-insert articles, ignoring duplicates (idempotent on re-fetch)
+function upsertArticles(articles) {
+  const insert = db.prepare(`
+    INSERT INTO articles
+      (source_id, title, url, description, content_html, content_text, image_url, published_at, fetched_at)
+    VALUES
+      (@source_id, @title, @url, @description, @content_html, @content_text, @image_url, @published_at, @fetched_at)
+    ON CONFLICT(url) DO UPDATE SET
+      title = excluded.title,
+      description = COALESCE(excluded.description, articles.description),
+      content_html = COALESCE(excluded.content_html, articles.content_html),
+      content_text = COALESCE(excluded.content_text, articles.content_text),
+      image_url = COALESCE(articles.image_url, excluded.image_url),
+      published_at = COALESCE(excluded.published_at, articles.published_at)
+  `);
+  const insertMany = db.transaction((rows) => {
+    let count = 0;
+    for (const row of rows) {
+      const result = insert.run(row);
+      if (result.changes > 0) count += 1;
+    }
+    return count;
+  });
+  return insertMany(articles);
+}
+
+function getDb() {
+  return db;
+}
+
+module.exports = { initializeDb, upsertArticles, getDb, SOURCES, GENERATED_DIR };
