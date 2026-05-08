@@ -543,6 +543,9 @@ function decodeHtmlEntities(str) {
 
 function normalizeText(text) {
   const normalized = decodeHtmlEntities(stripHtml(text))
+    .replace(/\b[a-z]{1,12}=https?%3A%2F%2F\S+/gi, ' ')
+    .replace(/\bhttps?%3A%2F%2F\S+/gi, ' ')
+    .replace(/\bhttps?:\/\/\S+/gi, ' ')
     .replace(/\|\s*Photo:[^.]+(?:\.)?/gi, ' ')
     .replace(/\|\s*Image:[^.]+(?:\.)?/gi, ' ')
     .replace(/\bPhoto by [^.]+(?:\.)?/gi, ' ')
