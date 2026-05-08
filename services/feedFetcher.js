@@ -17,12 +17,26 @@ function stripHtml(str, maxLen = null) {
   if (!str) return null;
   const text = str
     .replace(/<[^>]+>/g, ' ')   // remove tags
-    .replace(/&amp;/g,  '&')
-    .replace(/&lt;/g,   '<')
-    .replace(/&gt;/g,   '>')
+    .replace(/&#160;|&nbsp;/g, ' ')
+    .replace(/&#8217;|&#x2019;/gi, "'")
+    .replace(/&#8216;|&#x2018;/gi, "'")
+    .replace(/&#8220;|&#x201c;/gi, '"')
+    .replace(/&#8221;|&#x201d;/gi, '"')
+    .replace(/&#8230;|&#x2026;/gi, '...')
+    .replace(/&#8211;|&#x2013;/gi, '-')
+    .replace(/&#8212;|&#x2014;/gi, '—')
+    .replace(/&#038;|&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g,  "'")
-    .replace(/&nbsp;/g, ' ')
+    .replace(/&#39;/g, "'")
+    .replace(/â€™|â€˜/g, "'")
+    .replace(/â€œ|â€/g, '"')
+    .replace(/â€¦/g, '...')
+    .replace(/â€“/g, '-')
+    .replace(/â€”/g, '—')
+    .replace(/Â/g, '')
+    .replace(/�/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!text) return null;

@@ -530,9 +530,12 @@ function stripHtml(str) {
 function decodeHtmlEntities(str) {
   return String(str || '')
     .replace(/&#8217;/g, "'")
+    .replace(/&#8216;/g, "'")
     .replace(/&#8220;/g, '"')
     .replace(/&#8221;/g, '"')
     .replace(/&#8230;/g, '...')
+    .replace(/&#8211;/g, '-')
+    .replace(/&#8212;/g, '—')
     .replace(/&#038;|&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
@@ -543,6 +546,13 @@ function decodeHtmlEntities(str) {
 
 function normalizeText(text) {
   const normalized = decodeHtmlEntities(stripHtml(text))
+    .replace(/â€™|â€˜/g, "'")
+    .replace(/â€œ|â€/g, '"')
+    .replace(/â€¦/g, '...')
+    .replace(/â€“/g, '-')
+    .replace(/â€”/g, '—')
+    .replace(/Â/g, ' ')
+    .replace(/�/g, ' ')
     .replace(/\|\s*Photo:[^.]+(?:\.)?/gi, ' ')
     .replace(/\|\s*Image:[^.]+(?:\.)?/gi, ' ')
     .replace(/\bPhoto by [^.]+(?:\.)?/gi, ' ')
