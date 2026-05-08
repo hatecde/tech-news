@@ -17,18 +17,15 @@ function stripHtml(str, maxLen = null) {
   if (!str) return null;
   const text = str
     .replace(/<[^>]+>/g, ' ')   // remove tags
-    .replace(/&amp;/g,  '&')
-    .replace(/&lt;/g,   '<')
-    .replace(/&gt;/g,   '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g,  "'")
-    .replace(/&nbsp;/g, ' ')
+    .trim();
+
+  const decoded = decodeHtmlEntities(text)
     .replace(/\s+/g, ' ')
     .trim();
-  if (!text) return null;
-  if (!maxLen || text.length <= maxLen) return text;
+  if (!decoded) return null;
+  if (!maxLen || decoded.length <= maxLen) return decoded;
 
-  const sliced = text.slice(0, maxLen);
+  const sliced = decoded.slice(0, maxLen);
   const lastSentenceEnd = Math.max(
     sliced.lastIndexOf('.'),
     sliced.lastIndexOf('!'),
@@ -45,12 +42,26 @@ function stripHtml(str, maxLen = null) {
 
 function decodeHtmlEntities(str) {
   if (!str) return str;
+
+  const namedEntities = {
+    amp: '&',
+    quot: '"',
+    apos: "'",
+    lt: '<',
+    gt: '>',
+    nbsp: ' ',
+  };
+
   return str
-    .replace(/&#038;|&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&#(\d+);/g, (match, codePoint) => {
+      const parsed = Number.parseInt(codePoint, 10);
+      return Number.isNaN(parsed) ? match : String.fromCodePoint(parsed);
+    })
+    .replace(/&#x([\da-f]+);/gi, (match, hexCodePoint) => {
+      const parsed = Number.parseInt(hexCodePoint, 16);
+      return Number.isNaN(parsed) ? match : String.fromCodePoint(parsed);
+    })
+    .replace(/&([a-z]+);/gi, (match, entity) => namedEntities[entity.toLowerCase()] ?? match);
 }
 
 function normalizeImageUrl(url) {
@@ -139,7 +150,7 @@ function normalizeArticle(item, sourceId) {
 
   return {
     source_id:    sourceId,
-    title:        (item.title || 'Untitled').trim(),
+    title:        decodeHtmlEntities((item.title || 'Untitled').trim()),
     url,
     description:  buildCardDescription(item),
     content_html: typeof preferredContent === 'string' && /<[^>]+>/.test(preferredContent) ? preferredContent : null,
