@@ -1,5 +1,6 @@
 const Parser   = require('rss-parser');
 const { getDb, upsertArticles } = require('../db/database');
+const { cleanArticleText, cleanArticleTitle, decodeHtmlEntities } = require('./textCleanup');
 
 const parser = new Parser({
   timeout: 10000,
@@ -11,47 +12,6 @@ const parser = new Parser({
     ],
   },
 });
-
-// Strip HTML tags and optionally truncate to maxLen characters
-function stripHtml(str, maxLen = null) {
-  if (!str) return null;
-  const text = str
-    .replace(/<[^>]+>/g, ' ')   // remove tags
-    .replace(/&amp;/g,  '&')
-    .replace(/&lt;/g,   '<')
-    .replace(/&gt;/g,   '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g,  "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!text) return null;
-  if (!maxLen || text.length <= maxLen) return text;
-
-  const sliced = text.slice(0, maxLen);
-  const lastSentenceEnd = Math.max(
-    sliced.lastIndexOf('.'),
-    sliced.lastIndexOf('!'),
-    sliced.lastIndexOf('?')
-  );
-
-  if (lastSentenceEnd >= Math.max(80, Math.floor(maxLen * 0.45))) {
-    return sliced.slice(0, lastSentenceEnd + 1).trim();
-  }
-
-  const lastSpace = sliced.lastIndexOf(' ');
-  return (lastSpace > 0 ? sliced.slice(0, lastSpace) : sliced).trim() + '…';
-}
-
-function decodeHtmlEntities(str) {
-  if (!str) return str;
-  return str
-    .replace(/&#038;|&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
-}
 
 function normalizeImageUrl(url) {
   if (!url || typeof url !== 'string') return null;
@@ -108,7 +68,7 @@ function getPreferredContent(item) {
 
 function buildCardDescription(item) {
   const summarySource = item.contentSnippet || item.summary || item['content:encoded'] || item.content;
-  return stripHtml(summarySource, 240);
+  return cleanArticleText(summarySource, { maxLen: 240 });
 }
 
 // Normalize an rss-parser feed item into our DB row shape
@@ -139,11 +99,11 @@ function normalizeArticle(item, sourceId) {
 
   return {
     source_id:    sourceId,
-    title:        (item.title || 'Untitled').trim(),
+    title:        cleanArticleTitle(item.title),
     url,
     description:  buildCardDescription(item),
     content_html: typeof preferredContent === 'string' && /<[^>]+>/.test(preferredContent) ? preferredContent : null,
-    content_text: stripHtml(preferredContent),
+    content_text: cleanArticleText(preferredContent),
     image_url:    imageUrl,
     published_at: item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : null) || new Date().toISOString(),
     fetched_at:   new Date().toISOString(),

@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path     = require('path');
 const fs       = require('fs');
+const { cleanArticleText, cleanArticleTitle } = require('../services/textCleanup');
 
 const DATA_DIR      = path.join(__dirname, '..', 'data');
 const GENERATED_DIR = path.join(DATA_DIR, 'generated-images');
@@ -68,6 +69,7 @@ function initializeDb() {
   ensureColumn('articles', 'content_text', 'TEXT');
 
   syncSources();
+  cleanupStoredArticleText();
   console.log('[db] Initialized:', DB_PATH);
 }
 
@@ -143,6 +145,75 @@ function removeGeneratedImagesForSource(sourceId) {
     if (fs.existsSync(absolutePath)) {
       fs.unlinkSync(absolutePath);
     }
+  }
+}
+
+function cleanupStoredArticleText() {
+  const rows = db.prepare(`
+    SELECT
+      id,
+      title,
+      description,
+      content_text,
+      preview_text,
+      preview_fetched_at
+    FROM articles
+    WHERE title IS NOT NULL
+      OR description IS NOT NULL
+      OR content_text IS NOT NULL
+      OR preview_text IS NOT NULL
+  `).all();
+
+  if (rows.length === 0) return;
+
+  const update = db.prepare(`
+    UPDATE articles
+    SET
+      title = @title,
+      description = @description,
+      content_text = @content_text,
+      preview_text = @preview_text,
+      preview_fetched_at = @preview_fetched_at
+    WHERE id = @id
+  `);
+
+  const cleanup = db.transaction((articles) => {
+    let changed = 0;
+
+    for (const article of articles) {
+      const title = cleanArticleTitle(article.title);
+      const description = cleanArticleText(article.description, { maxLen: 240 });
+      const contentText = cleanArticleText(article.content_text);
+      const previewText = cleanArticleText(article.preview_text);
+      const previewFetchedAt = previewText ? article.preview_fetched_at : null;
+
+      if (
+        title === article.title &&
+        description === article.description &&
+        contentText === article.content_text &&
+        previewText === article.preview_text &&
+        previewFetchedAt === article.preview_fetched_at
+      ) {
+        continue;
+      }
+
+      update.run({
+        id: article.id,
+        title,
+        description,
+        content_text: contentText,
+        preview_text: previewText,
+        preview_fetched_at: previewFetchedAt,
+      });
+      changed += 1;
+    }
+
+    return changed;
+  });
+
+  const changed = cleanup(rows);
+  if (changed > 0) {
+    console.log(`[db] Cleaned cached article text for ${changed} rows`);
   }
 }
 
