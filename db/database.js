@@ -14,6 +14,8 @@ const SOURCES = [
   { name: 'TechCrunch',       slug: 'techcrunch',       url: 'https://techcrunch.com/feed/' },
   { name: 'Engadget',         slug: 'engadget',         url: 'https://www.engadget.com/rss.xml' },
   { name: 'PC Gamer',         slug: 'pc-gamer',         url: 'https://www.pcgamer.com/rss/' },
+  { name: 'dev.ua (English)',  slug: 'dev-ua-en',       url: 'https://dev.ua/en/rss' },
+  { name: 'AIN (English)',     slug: 'ain-en',          url: 'https://en.ain.ua/feed/' },
 ];
 
 function initializeDb() {
