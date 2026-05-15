@@ -2,6 +2,7 @@ const express = require('express');
 const { getDb } = require('../db/database');
 const { getArticlePreview } = require('../services/articlePreview');
 const { generateArticleImage } = require('../services/imageGenerator');
+const { streamArticleImage } = require('../services/articleImageProxy');
 
 const router = express.Router();
 
@@ -47,6 +48,11 @@ router.get('/', (req, res) => {
     LIMIT ? OFFSET ?
   `).all(...queryParams);
 
+  const normalizedArticles = articles.map((article) => ({
+    ...article,
+    image_url: article.image_url ? `/api/articles/${article.id}/image` : article.image_url,
+  }));
+
   const { total } = db.prepare(`
     SELECT COUNT(*) AS total
     FROM articles a
@@ -54,7 +60,24 @@ router.get('/', (req, res) => {
     ${whereClause}
   `).get(...countParams);
 
-  res.json({ articles, total, limit, offset });
+  res.json({ articles: normalizedArticles, total, limit, offset });
+});
+
+router.get('/:id/image', async (req, res) => {
+  const articleId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(articleId) || articleId <= 0) {
+    return res.status(400).json({ ok: false, error: 'Invalid article id' });
+  }
+
+  try {
+    const { body, contentType } = await streamArticleImage(articleId);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(body);
+  } catch (err) {
+    const status = err.message === 'Article not found' ? 404 : 502;
+    res.status(status).json({ ok: false, error: err.message });
+  }
 });
 
 router.post('/:id/generate-image', async (req, res) => {

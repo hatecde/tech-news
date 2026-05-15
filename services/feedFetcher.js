@@ -13,29 +13,62 @@ const parser = new Parser({
   },
 });
 
-function normalizeImageUrl(url) {
+function normalizeImageUrl(url, baseUrl = null) {
   if (!url || typeof url !== 'string') return null;
   const decoded = decodeHtmlEntities(url).trim();
-  if (!/^https?:\/\//i.test(decoded)) return null;
-  return decoded;
+  if (!decoded) return null;
+
+  try {
+    if (baseUrl) {
+      const resolved = new URL(decoded, baseUrl).href;
+      return /^https?:\/\//i.test(resolved) ? resolved : null;
+    }
+
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+    if (/^\/\//.test(decoded)) return `https:${decoded}`;
+  } catch (_) {
+    return null;
+  }
+
+  return null;
 }
 
-// Extract the first valid HTTPS image URL from HTML content
-function extractImageFromHtml(html) {
+// Extract the first valid image URL from HTML content
+function extractImageFromHtml(html, baseUrl = null) {
   if (!html) return null;
 
   const decoded = decodeHtmlEntities(html);
   const patterns = [
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
-    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
-    /<(?:img|source)[^>]+(?:data-src|data-original|src)=["']([^"']+)["']/i,
+    { regex: /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i, kind: 'url' },
+    { regex: /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i, kind: 'url' },
+    { regex: /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i, kind: 'url' },
+    { regex: /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i, kind: 'url' },
+    { regex: /<(?:img|source)[^>]+(?:srcset|data-srcset|imagesrcset)=["']([^"']+)["']/i, kind: 'srcset' },
+    { regex: /<(?:img|source)[^>]+(?:data-src|data-original|src)=["']([^"']+)["']/i, kind: 'url' },
   ];
 
-  for (const pattern of patterns) {
-    const match = decoded.match(pattern);
-    const imageUrl = normalizeImageUrl(match?.[1]);
+  for (const { regex, kind } of patterns) {
+    const match = decoded.match(regex);
+    const imageUrl = kind === 'srcset'
+      ? extractImageFromSrcset(match?.[1], baseUrl)
+      : normalizeImageUrl(match?.[1], baseUrl);
+    if (imageUrl) return imageUrl;
+  }
+
+  return null;
+}
+
+function extractImageFromSrcset(srcset, baseUrl = null) {
+  if (!srcset || typeof srcset !== 'string') return null;
+
+  const candidates = decodeHtmlEntities(srcset)
+    .split(',')
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    const candidateUrl = candidates[i].split(/\s+/)[0];
+    const imageUrl = normalizeImageUrl(candidateUrl, baseUrl);
     if (imageUrl) return imageUrl;
   }
 
@@ -50,7 +83,7 @@ async function fetchImageFromArticlePage(url) {
     if (!response.ok) return null;
 
     const html = await response.text();
-    return extractImageFromHtml(html);
+    return extractImageFromHtml(html, url);
   } catch (_) {
     return null;
   }
@@ -84,15 +117,15 @@ function normalizeArticle(item, sourceId) {
   const mc = item['media:content'];
   const mt = item['media:thumbnail'];
   const imageUrl =
-    normalizeImageUrl(item.enclosure?.url) ||
-    normalizeImageUrl(mc?.$?.url) ||
-    normalizeImageUrl(mc?.url) ||
-    normalizeImageUrl(typeof mc === 'string' ? mc : null) ||
-    normalizeImageUrl(mt?.$?.url) ||
-    normalizeImageUrl(mt?.url) ||
-    normalizeImageUrl(typeof mt === 'string' ? mt : null) ||
-    extractImageFromHtml(item.content) ||
-    extractImageFromHtml(item['content:encoded']) ||
+    normalizeImageUrl(item.enclosure?.url, url) ||
+    normalizeImageUrl(mc?.$?.url, url) ||
+    normalizeImageUrl(mc?.url, url) ||
+    normalizeImageUrl(typeof mc === 'string' ? mc : null, url) ||
+    normalizeImageUrl(mt?.$?.url, url) ||
+    normalizeImageUrl(mt?.url, url) ||
+    normalizeImageUrl(typeof mt === 'string' ? mt : null, url) ||
+    extractImageFromHtml(item.content, url) ||
+    extractImageFromHtml(item['content:encoded'], url) ||
     null;
 
   const preferredContent = getPreferredContent(item);
@@ -180,4 +213,10 @@ async function fetchOne(slug) {
   return fetchSource(source);
 }
 
-module.exports = { fetchAll, fetchOne };
+module.exports = {
+  fetchAll,
+  fetchOne,
+  normalizeImageUrl,
+  extractImageFromHtml,
+  extractImageFromSrcset,
+};
