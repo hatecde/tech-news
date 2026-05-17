@@ -788,6 +788,10 @@ body::before {
   min-width: 220px;
 }
 
+.btn-load-more[hidden] {
+  display: none;
+}
+
 .article-preview-modal {
   position: fixed;
   inset: 0;

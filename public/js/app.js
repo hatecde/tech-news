@@ -12,6 +12,7 @@ import {
   hideError,
   setRefreshLoading,
   setLoadMoreVisible,
+  setLoadMoreLoading,
 } from './ui.js';
 
 const state = {
@@ -23,7 +24,10 @@ const state = {
   lastFetchedAt: null,
   sources: [],
   visibleArticles: [],
+  paginationMessage: null,
 };
+
+let paginationMessageTimer = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
@@ -38,7 +42,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('refresh-btn').addEventListener('click', handleRefresh);
 
   document.getElementById('load-more').addEventListener('click', () => {
-    state.offset += state.limit;
+    if (state.isLoading) return;
+    if (!canLoadMore()) {
+      setLoadMoreVisible(false);
+      return;
+    }
+
+    clearPaginationMessageTimer();
+    state.paginationMessage = 'Loading more stories…';
+    updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
+    setLoadMoreLoading(true);
+    state.offset = state.visibleArticles.length;
     loadArticles(false);
   });
 
@@ -62,19 +76,23 @@ async function loadSources() {
     const times = sources.map((source) => source.last_fetched_at).filter(Boolean).sort();
     state.lastFetchedAt = times.at(-1) || null;
     updateLastRefreshed(state.lastFetchedAt);
-    updateOverview(getOverviewState());
+    updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
   } catch (err) {
     console.error('[app] loadSources error:', err);
   }
 }
 
 async function loadArticles(reset = false) {
+  if (reset) {
+    clearPaginationMessageTimer();
+    state.paginationMessage = null;
+    state.offset = 0;
+    setLoadMoreVisible(false);
+    setLoadMoreLoading(false);
+  }
+
   if (state.isLoading) return;
   state.isLoading = true;
-
-  if (reset) {
-    state.offset = 0;
-  }
 
   try {
     const { articles, total } = await getArticles({
@@ -100,22 +118,38 @@ async function loadArticles(reset = false) {
         hasFeatured: Boolean(state.visibleArticles[0]),
         onArticleClick: handleArticleClick,
       });
+
+      if (articles.length > 0) {
+        showPaginationMessage(`Loaded ${articles.length} more ${articles.length === 1 ? 'story' : 'stories'}`, 2200);
+      } else {
+        clearPaginationMessageTimer();
+        state.paginationMessage = null;
+      }
     }
 
     hideError();
-    updateOverview(getOverviewState());
+    updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
 
-    const hasMore = state.offset + state.limit < total;
-    setLoadMoreVisible(hasMore && articles.length > 0);
+    setLoadMoreVisible(canLoadMore());
   } catch (err) {
     console.error('[app] loadArticles error:', err);
+    clearPaginationMessageTimer();
+    state.paginationMessage = null;
     showError('Failed to load articles: ' + err.message);
+    updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
   } finally {
     state.isLoading = false;
+    setLoadMoreLoading(false);
   }
 }
 
+function canLoadMore() {
+  return state.visibleArticles.length > 0 && state.visibleArticles.length < state.total;
+}
+
 function onSourceClick(slug) {
+  clearPaginationMessageTimer();
+  state.paginationMessage = null;
   state.activeSource = slug;
   state.offset = 0;
 
@@ -133,6 +167,8 @@ function onSourceClick(slug) {
 
 async function handleRefresh() {
   setRefreshLoading(true);
+  clearPaginationMessageTimer();
+  state.paginationMessage = null;
 
   try {
     await postRefresh();
@@ -142,6 +178,7 @@ async function handleRefresh() {
     showError('Refresh failed: ' + err.message);
   } finally {
     setRefreshLoading(false);
+    updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
   }
 }
 
@@ -162,7 +199,7 @@ async function checkForUpdates() {
       updateLastRefreshed(latest);
       renderSourceList(sources, state.activeSource, onSourceClick);
       updateSidebarStats(sources);
-      updateOverview(getOverviewState());
+      updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
 
       if (state.offset === 0) {
         loadArticles(true);
@@ -181,4 +218,27 @@ function getOverviewState() {
     visibleCount: state.visibleArticles.length,
     lastFetchedAt: state.lastFetchedAt,
   };
+}
+
+function showPaginationMessage(message, clearAfterMs = 0) {
+  clearPaginationMessageTimer();
+  state.paginationMessage = message;
+  updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
+
+  if (clearAfterMs > 0) {
+    paginationMessageTimer = setTimeout(() => {
+      if (state.paginationMessage === message) {
+        state.paginationMessage = null;
+        updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
+      }
+      paginationMessageTimer = null;
+    }, clearAfterMs);
+  }
+}
+
+function clearPaginationMessageTimer() {
+  if (paginationMessageTimer) {
+    clearTimeout(paginationMessageTimer);
+    paginationMessageTimer = null;
+  }
 }

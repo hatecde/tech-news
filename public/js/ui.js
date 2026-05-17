@@ -159,7 +159,7 @@ export function updateOverview({
   totalArticles,
   visibleCount,
   lastFetchedAt,
-}) {
+}, { paginationMessage = null } = {}) {
   const activeSourceName = activeSource
     ? sources.find((source) => source.slug === activeSource)?.name || 'Selected source'
     : 'All feeds';
@@ -183,9 +183,14 @@ export function updateOverview({
     ? `${activeSourceName} stories`
     : 'Latest coverage';
 
-  document.getElementById('results-meta').textContent = totalArticles
+  const resultsMeta = document.getElementById('results-meta');
+  const baseMessage = totalArticles
     ? `Showing ${formatCompactNumber(visibleCount || 0)} of ${formatCompactNumber(totalArticles)} stories${lastFetchedAt ? ` · synced ${formatTimeAgo(lastFetchedAt)}` : ''}`
     : 'Waiting for the first feed refresh to populate the stream.';
+
+  resultsMeta.textContent = paginationMessage
+    ? `${baseMessage} · ${paginationMessage}`
+    : baseMessage;
 }
 
 export function renderFeaturedStory(article) {
@@ -726,7 +731,16 @@ export function setRefreshLoading(isLoading) {
 }
 
 export function setLoadMoreVisible(visible) {
-  document.getElementById('load-more').hidden = !visible;
+  const btn = document.getElementById('load-more');
+  btn.hidden = !visible;
+  if (!visible) {
+    btn.disabled = false;
+  }
+}
+
+export function setLoadMoreLoading(isLoading) {
+  const btn = document.getElementById('load-more');
+  btn.disabled = isLoading;
 }
 
 export function initializeArticlePreview({ onDismiss } = {}) {
