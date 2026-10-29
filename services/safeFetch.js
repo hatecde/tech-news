@@ -27,6 +27,7 @@ async function fetchLimited(input, {
     await acquireRequestSlot(controller.signal);
     acquiredSlot = true;
     let currentUrl = await validatePublicUrl(input);
+    if (controller.signal.aborted) throw new Error('Outbound request timed out');
 
     for (let redirects = 0; ; redirects += 1) {
       const response = await fetch(currentUrl, {
@@ -43,6 +44,7 @@ async function fetchLimited(input, {
           throw new Error('Too many or invalid redirects');
         }
         currentUrl = await validatePublicUrl(new URL(location, currentUrl));
+        if (controller.signal.aborted) throw new Error('Outbound request timed out');
         continue;
       }
 
@@ -99,6 +101,8 @@ function acquireRequestSlot(signal) {
       signal.removeEventListener('abort', onAbort);
       if (signal.aborted) {
         reject(new Error('Outbound request timed out while queued'));
+        // The slot was handed to this waiter; pass it on without leaking a slot.
+        releaseRequestSlot();
         return;
       }
       activeRequests += 1;
