@@ -1,6 +1,7 @@
 const Parser   = require('rss-parser');
 const { getDb, upsertArticles } = require('../db/database');
 const { cleanArticleText, cleanArticleTitle, decodeHtmlEntities } = require('./textCleanup');
+const { fetchLimited } = require('./safeFetch');
 
 const parser = new Parser({
   timeout: 10000,
@@ -12,6 +13,8 @@ const parser = new Parser({
     ],
   },
 });
+
+const sourceFetches = new Map();
 
 function normalizeImageUrl(url, baseUrl = null) {
   if (!url || typeof url !== 'string') return null;
@@ -77,14 +80,16 @@ function extractImageFromSrcset(srcset, baseUrl = null) {
 
 async function fetchImageFromArticlePage(url) {
   try {
-    const response = await fetch(url, {
+    const result = await fetchLimited(url, {
       headers: { 'User-Agent': 'TechFeedAggregator/1.0 (+https://github.com/techfeed)' },
+      timeoutMs: 8000,
+      maxBytes: 1_500_000,
+      acceptContentTypes: ['text/html', 'application/xhtml+xml'],
     });
-    if (!response.ok) return null;
-
-    const html = await response.text();
-    return extractImageFromHtml(html, url);
-  } catch (_) {
+    if (!result.ok) return null;
+    return extractImageFromHtml(result.body.toString('utf8'), result.url);
+  } catch (error) {
+    console.warn('[feedFetcher] Article image lookup failed:', error.message);
     return null;
   }
 }
@@ -104,16 +109,31 @@ function buildCardDescription(item) {
   return cleanArticleText(summarySource, { maxLen: 240 });
 }
 
-// Normalize an rss-parser feed item into our DB row shape
+function normalizeArticleUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePublishedAt(item) {
+  for (const candidate of [item.isoDate, item.pubDate]) {
+    if (typeof candidate !== 'string' || !candidate.trim()) continue;
+    const timestamp = Date.parse(candidate);
+    if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+// Normalize an RSS item into our DB row shape.
 function normalizeArticle(item, sourceId) {
-  const url =
-    (typeof item.link === 'string' ? item.link : null) ||
-    (typeof item.guid === 'string' && item.guid.startsWith('http') ? item.guid : null);
+  const url = normalizeArticleUrl(item.link) || normalizeArticleUrl(item.guid);
+  if (!url) return null;
 
-  if (!url) return null;   // skip items with no usable URL
-
-  // Image extraction: try several fields in priority order.
-  // media:content can be { $: { url } } or { url } depending on the feed.
   const mc = item['media:content'];
   const mt = item['media:thumbnail'];
   const imageUrl =
@@ -129,17 +149,16 @@ function normalizeArticle(item, sourceId) {
     null;
 
   const preferredContent = getPreferredContent(item);
-
   return {
-    source_id:    sourceId,
-    title:        cleanArticleTitle(item.title),
+    source_id: sourceId,
+    title: cleanArticleTitle(item.title),
     url,
-    description:  buildCardDescription(item),
+    description: buildCardDescription(item),
     content_html: typeof preferredContent === 'string' && /<[^>]+>/.test(preferredContent) ? preferredContent : null,
     content_text: cleanArticleText(preferredContent),
-    image_url:    imageUrl,
-    published_at: item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : null) || new Date().toISOString(),
-    fetched_at:   new Date().toISOString(),
+    image_url: imageUrl,
+    published_at: normalizePublishedAt(item),
+    fetched_at: new Date().toISOString(),
   };
 }
 
@@ -158,17 +177,32 @@ async function enrichArticleImage(article, source) {
 
 // Fetch a single source, insert new articles, update last_fetched_at
 async function fetchSource(source) {
+  const existing = sourceFetches.get(source.id);
+  if (existing) return existing;
+  const task = fetchSourceInternal(source).finally(() => sourceFetches.delete(source.id));
+  sourceFetches.set(source.id, task);
+  return task;
+}
+
+async function fetchSourceInternal(source) {
   const db = getDb();
   try {
     const feed  = await parser.parseURL(source.url);
     const items = feed.items.slice(0, 50);   // cap at 50 per fetch
 
-    const articles = (await Promise.all(
-      items
-        .map(item => normalizeArticle(item, source.id))
-        .filter(Boolean)
-        .map(article => enrichArticleImage(article, source))
-    ));
+    const normalized = [];
+    for (const item of items) {
+      try {
+        const article = normalizeArticle(item, source.id);
+        if (article) normalized.push(article);
+      } catch (error) {
+        console.warn(`[feedFetcher] Skipping malformed item from ${source.name}:`, error.message);
+      }
+    }
+
+    const articles = await mapWithConcurrency(normalized, 5, (article) =>
+      enrichArticleImage(article, source)
+    );
 
     const inserted = upsertArticles(articles);
     const now = new Date().toISOString();
@@ -181,7 +215,20 @@ async function fetchSource(source) {
   }
 }
 
-// Fetch all sources in parallel
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]);
+    }
+  }));
+  return results;
+}
+
+// Fetch all sources in parallel. Source locks prevent duplicate per-feed work.
 async function fetchAll() {
   const db      = getDb();
   const sources = db.prepare('SELECT * FROM sources').all();
