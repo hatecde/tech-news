@@ -346,271 +346,47 @@ function buildCard(article, onArticleClick) {
 }
 
 function makeCardMedia(article) {
-  const initialUrl = getPreferredImageUrl(article);
-  if (!initialUrl) return makeGeneratedMediaWrap(article);
-
   const wrap = document.createElement('div');
   wrap.className = 'card-image-wrap';
+
+  const initialUrl = getPreferredImageUrl(article);
+  if (!initialUrl) {
+    wrap.appendChild(makeImagePlaceholder('card'));
+    return wrap;
+  }
+
   const img = createMediaImage(initialUrl, 'card');
-
-  img.onerror = () => {
-    // Use the locally generated SVG artwork; don't trigger paid image generation.
-    wrap.replaceChildren(makeGeneratedMediaImage(article, 'card'));
-  };
-
+  img.onerror = () => wrap.replaceChildren(makeImagePlaceholder('card'));
   wrap.appendChild(img);
-  return wrap;
-}
-
-function makeGeneratedMediaWrap(article) {
-  const wrap = document.createElement('div');
-  wrap.className = 'card-image-wrap card-image-wrap--generated';
-  wrap.appendChild(makeGeneratedMediaImage(article, 'card'));
   return wrap;
 }
 
 function makeFeaturedMediaContent(article) {
   const initialUrl = getPreferredImageUrl(article);
-  if (!initialUrl) return makeGeneratedMediaImage(article, 'featured');
+  if (!initialUrl) return makeImagePlaceholder('featured');
 
   const img = createMediaImage(initialUrl, 'featured');
-  img.onerror = () => img.replaceWith(makeGeneratedMediaImage(article, 'featured'));
+  img.onerror = () => img.replaceWith(makeImagePlaceholder('featured'));
   return img;
 }
 
-function makeGeneratedMediaImage(article, variant) {
-  return createMediaImage(createGeneratedArtUrl(article, variant), variant);
-}
+function makeImagePlaceholder(variant) {
+  const placeholder = document.createElement('div');
+  placeholder.className = variant === 'featured'
+    ? 'featured-media-placeholder'
+    : 'card-image-placeholder';
+  placeholder.setAttribute('aria-hidden', 'true');
 
-function createGeneratedArtUrl(article, variant) {
-  const width = variant === 'featured' ? 1600 : 1200;
-  const height = variant === 'featured' ? 1000 : 750;
-  const seed = getHeadlineSeed(`${article.source_slug}:${article.title}`, 10_000);
-  const accentHue = getHeadlineSeed(article.source_slug, 360);
-  const signalHue = (accentHue + 38 + (seed % 44)) % 360;
-  const accent = `hsl(${accentHue}, 72%, 66%)`;
-  const accentSoft = `hsla(${accentHue}, 72%, 66%, 0.18)`;
-  const signal = `hsl(${signalHue}, 18%, 88%)`;
-  const signalSoft = `hsla(${signalHue}, 18%, 88%, 0.12)`;
-  const theme = classifyHeadlineTheme(article.title);
-
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" fill="none">
-      <defs>
-        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#050505"/>
-          <stop offset="52%" stop-color="#101012"/>
-          <stop offset="100%" stop-color="#020202"/>
-        </linearGradient>
-        <radialGradient id="glow" cx="50%" cy="40%" r="70%">
-          <stop offset="0%" stop-color="${accentSoft}"/>
-          <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
-        </radialGradient>
-        <linearGradient id="beam" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="${accent}" stop-opacity="0.82"/>
-          <stop offset="100%" stop-color="${signal}" stop-opacity="0.15"/>
-        </linearGradient>
-      </defs>
-      <rect width="${width}" height="${height}" rx="28" fill="url(#bg)"/>
-      <rect x="${Math.round(width * 0.04)}" y="${Math.round(height * 0.06)}" width="${Math.round(width * 0.92)}" height="${Math.round(height * 0.88)}" rx="28" fill="none" stroke="rgba(255,255,255,0.08)"/>
-      <rect x="${Math.round(width * 0.075)}" y="${Math.round(height * 0.11)}" width="${Math.round(width * 0.85)}" height="${Math.round(height * 0.78)}" rx="22" fill="none" stroke="rgba(255,255,255,0.05)"/>
-      <circle cx="${Math.round(width * 0.68)}" cy="${Math.round(height * 0.3)}" r="${Math.round(height * 0.36)}" fill="url(#glow)"/>
-      ${buildGridPattern(width, height, seed)}
-      ${buildThemeMotif(theme, { width, height, seed, accent, accentSoft, signal, signalSoft })}
-      ${buildSignalMarks(width, height, seed, accent, signal)}
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function classifyHeadlineTheme(title) {
-  const lower = title.toLowerCase();
-
-  if (matchesTheme(lower, ['ai', 'openai', 'chatgpt', 'llm', 'model', 'machine learning', 'neural', 'robot'])) {
-    return 'ai';
-  }
-  if (matchesTheme(lower, ['security', 'hack', 'breach', 'cyber', 'malware', 'ransomware', 'phishing', 'privacy'])) {
-    return 'security';
-  }
-  if (matchesTheme(lower, ['apple', 'iphone', 'android', 'pixel', 'mobile', 'phone', 'tablet', 'watch'])) {
-    return 'mobile';
-  }
-  if (matchesTheme(lower, ['nasa', 'space', 'rocket', 'satellite', 'mars', 'moon', 'starship', 'orbit'])) {
-    return 'space';
-  }
-  if (matchesTheme(lower, ['chip', 'gpu', 'cpu', 'nvidia', 'amd', 'intel', 'semiconductor', 'silicon'])) {
-    return 'chips';
-  }
-  if (matchesTheme(lower, ['startup', 'funding', 'market', 'revenue', 'ipo', 'business', 'earnings', 'sales'])) {
-    return 'business';
-  }
-  if (matchesTheme(lower, ['browser', 'social', 'meta', 'google', 'youtube', 'tiktok', 'web', 'search'])) {
-    return 'web';
-  }
-
-  return 'general';
-}
-
-function matchesTheme(lowerTitle, keywords) {
-  return keywords.some((keyword) => lowerTitle.includes(keyword));
-}
-
-function buildThemeMotif(theme, palette) {
-  switch (theme) {
-    case 'ai':
-      return buildAiMotif(palette);
-    case 'security':
-      return buildSecurityMotif(palette);
-    case 'mobile':
-      return buildMobileMotif(palette);
-    case 'space':
-      return buildSpaceMotif(palette);
-    case 'chips':
-      return buildChipMotif(palette);
-    case 'business':
-      return buildBusinessMotif(palette);
-    case 'web':
-      return buildWebMotif(palette);
-    default:
-      return buildGeneralMotif(palette);
-  }
-}
-
-function buildAiMotif({ width, height, seed, accent, signalSoft }) {
-  const nodes = Array.from({ length: 7 }, (_, index) => {
-    const angle = ((seed + index * 39) % 360) * (Math.PI / 180);
-    const radius = width * 0.1 + index * 18;
-    const x = Math.round(width * 0.52 + Math.cos(angle) * radius);
-    const y = Math.round(height * 0.44 + Math.sin(angle) * radius * 0.65);
-    return `<circle cx="${x}" cy="${y}" r="${10 + (index % 3) * 3}" fill="${accent}" fill-opacity="${0.55 - index * 0.05}"/>`;
-  }).join('');
-
-  return `
-    <path d="M ${width * 0.3} ${height * 0.62} C ${width * 0.38} ${height * 0.28}, ${width * 0.63} ${height * 0.28}, ${width * 0.7} ${height * 0.6}" stroke="${accent}" stroke-opacity="0.55" stroke-width="5" fill="none"/>
-    <path d="M ${width * 0.34} ${height * 0.68} C ${width * 0.42} ${height * 0.82}, ${width * 0.58} ${height * 0.82}, ${width * 0.66} ${height * 0.68}" stroke="${signalSoft}" stroke-width="28" fill="none"/>
-    ${nodes}
-  `;
-}
-
-function buildSecurityMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <path d="M ${width * 0.5} ${height * 0.18} L ${width * 0.68} ${height * 0.26} L ${width * 0.66} ${height * 0.54} C ${width * 0.64} ${height * 0.68}, ${width * 0.56} ${height * 0.78}, ${width * 0.5} ${height * 0.84} C ${width * 0.44} ${height * 0.78}, ${width * 0.36} ${height * 0.68}, ${width * 0.34} ${height * 0.54} L ${width * 0.32} ${height * 0.26} Z" fill="${signalSoft}" stroke="${accent}" stroke-width="6"/>
-    <rect x="${width * 0.42}" y="${height * 0.42}" width="${width * 0.16}" height="${height * 0.18}" rx="24" fill="rgba(255,255,255,0.03)" stroke="${signal}" stroke-opacity="0.35"/>
-    <path d="M ${width * 0.45} ${height * 0.42} v-${height * 0.06} a${width * 0.05} ${height * 0.08} 0 0 1 ${width * 0.1} 0 v${height * 0.06}" stroke="${accent}" stroke-width="6" fill="none"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.51}" r="12" fill="${accent}"/>
-  `;
-}
-
-function buildMobileMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <rect x="${width * 0.37}" y="${height * 0.16}" width="${width * 0.26}" height="${height * 0.62}" rx="38" fill="${signalSoft}" stroke="${accent}" stroke-width="6"/>
-    <rect x="${width * 0.405}" y="${height * 0.22}" width="${width * 0.19}" height="${height * 0.46}" rx="24" fill="rgba(255,255,255,0.03)"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.73}" r="11" fill="${signal}" fill-opacity="0.55"/>
-    <path d="M ${width * 0.28} ${height * 0.44} q ${width * 0.07} -${height * 0.12} ${width * 0.14} 0" stroke="${accent}" stroke-opacity="0.72" stroke-width="7" fill="none"/>
-    <path d="M ${width * 0.58} ${height * 0.44} q ${width * 0.07} -${height * 0.12} ${width * 0.14} 0" stroke="${accent}" stroke-opacity="0.42" stroke-width="7" fill="none"/>
-  `;
-}
-
-function buildSpaceMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <circle cx="${width * 0.5}" cy="${height * 0.5}" r="${height * 0.15}" fill="${signalSoft}" stroke="${accent}" stroke-width="5"/>
-    <ellipse cx="${width * 0.5}" cy="${height * 0.5}" rx="${width * 0.24}" ry="${height * 0.11}" stroke="${signal}" stroke-opacity="0.35" stroke-width="5"/>
-    <ellipse cx="${width * 0.5}" cy="${height * 0.5}" rx="${width * 0.18}" ry="${height * 0.26}" stroke="${accent}" stroke-opacity="0.4" stroke-width="4"/>
-    <circle cx="${width * 0.69}" cy="${height * 0.39}" r="12" fill="${accent}"/>
-    <path d="M ${width * 0.26} ${height * 0.68} l ${width * 0.08} -${height * 0.16} l ${width * 0.04} ${height * 0.08} l ${width * 0.05} 0 l -${width * 0.08} ${height * 0.12} z" fill="${signal}" fill-opacity="0.4"/>
-  `;
-}
-
-function buildChipMotif({ width, height, accent, signal, signalSoft }) {
-  const pins = Array.from({ length: 6 }, (_, index) => {
-    const x = width * 0.37 + index * width * 0.045;
-    return `
-      <rect x="${x}" y="${height * 0.2}" width="10" height="${height * 0.06}" fill="${signal}" fill-opacity="0.5"/>
-      <rect x="${x}" y="${height * 0.74}" width="10" height="${height * 0.06}" fill="${signal}" fill-opacity="0.5"/>
-    `;
-  }).join('');
-
-  return `
-    <rect x="${width * 0.34}" y="${height * 0.26}" width="${width * 0.32}" height="${height * 0.48}" rx="26" fill="${signalSoft}" stroke="${accent}" stroke-width="6"/>
-    <rect x="${width * 0.42}" y="${height * 0.36}" width="${width * 0.16}" height="${height * 0.18}" rx="16" fill="rgba(255,255,255,0.05)" stroke="${signal}" stroke-opacity="0.32"/>
-    <path d="M ${width * 0.29} ${height * 0.38} H ${width * 0.34} M ${width * 0.66} ${height * 0.38} H ${width * 0.71} M ${width * 0.29} ${height * 0.54} H ${width * 0.34} M ${width * 0.66} ${height * 0.54} H ${width * 0.71}" stroke="${accent}" stroke-width="6"/>
-    ${pins}
-  `;
-}
-
-function buildBusinessMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <rect x="${width * 0.28}" y="${height * 0.58}" width="${width * 0.08}" height="${height * 0.16}" rx="14" fill="${signalSoft}" stroke="${accent}" stroke-width="4"/>
-    <rect x="${width * 0.41}" y="${height * 0.46}" width="${width * 0.08}" height="${height * 0.28}" rx="14" fill="${signalSoft}" stroke="${accent}" stroke-width="4"/>
-    <rect x="${width * 0.54}" y="${height * 0.34}" width="${width * 0.08}" height="${height * 0.4}" rx="14" fill="${signalSoft}" stroke="${accent}" stroke-width="4"/>
-    <path d="M ${width * 0.24} ${height * 0.64} C ${width * 0.36} ${height * 0.58}, ${width * 0.48} ${height * 0.44}, ${width * 0.66} ${height * 0.28}" stroke="${signal}" stroke-opacity="0.45" stroke-width="6" fill="none"/>
-    <circle cx="${width * 0.66}" cy="${height * 0.28}" r="12" fill="${accent}"/>
-  `;
-}
-
-function buildWebMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <rect x="${width * 0.24}" y="${height * 0.24}" width="${width * 0.52}" height="${height * 0.42}" rx="26" fill="${signalSoft}" stroke="${accent}" stroke-width="6"/>
-    <rect x="${width * 0.24}" y="${height * 0.24}" width="${width * 0.52}" height="${height * 0.08}" rx="26" fill="rgba(255,255,255,0.05)"/>
-    <circle cx="${width * 0.29}" cy="${height * 0.28}" r="8" fill="${signal}" fill-opacity="0.75"/>
-    <circle cx="${width * 0.33}" cy="${height * 0.28}" r="8" fill="${signal}" fill-opacity="0.45"/>
-    <circle cx="${width * 0.37}" cy="${height * 0.28}" r="8" fill="${signal}" fill-opacity="0.25"/>
-    <path d="M ${width * 0.34} ${height * 0.46} H ${width * 0.62}" stroke="${accent}" stroke-width="6"/>
-    <path d="M ${width * 0.34} ${height * 0.56} H ${width * 0.56}" stroke="${signal}" stroke-opacity="0.38" stroke-width="6"/>
-  `;
-}
-
-function buildGeneralMotif({ width, height, accent, signal, signalSoft }) {
-  return `
-    <circle cx="${width * 0.5}" cy="${height * 0.5}" r="${height * 0.22}" fill="${signalSoft}" stroke="${accent}" stroke-width="5"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.5}" r="${height * 0.13}" fill="rgba(255,255,255,0.03)" stroke="${signal}" stroke-opacity="0.3"/>
-    <path d="M ${width * 0.3} ${height * 0.7} L ${width * 0.7} ${height * 0.3}" stroke="${accent}" stroke-opacity="0.36" stroke-width="5"/>
-    <path d="M ${width * 0.35} ${height * 0.25} L ${width * 0.74} ${height * 0.64}" stroke="${signal}" stroke-opacity="0.22" stroke-width="4"/>
-  `;
-}
-
-function buildGridPattern(width, height, seed) {
-  const step = 56 + (seed % 4) * 12;
-  let lines = '';
-
-  for (let x = step; x < width; x += step) {
-    const opacity = x % (step * 2) === 0 ? 0.08 : 0.04;
-    lines += `<line x1="${x}" y1="0" x2="${x}" y2="${height}" stroke="rgba(255,255,255,${opacity})" stroke-width="1"/>`;
-  }
-
-  for (let y = step; y < height; y += step) {
-    const opacity = y % (step * 2) === 0 ? 0.08 : 0.04;
-    lines += `<line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="rgba(255,255,255,${opacity})" stroke-width="1"/>`;
-  }
-
-  return lines;
-}
-
-function buildSignalMarks(width, height, seed, accent, signal) {
-  const bars = Array.from({ length: 9 }, (_, index) => {
-    const barWidth = 18;
-    const gap = 14;
-    const x = width * 0.12 + index * (barWidth + gap);
-    const barHeight = height * (0.08 + ((seed + index * 17) % 18) / 100);
-    return `<rect x="${x}" y="${height * 0.82 - barHeight}" width="${barWidth}" height="${barHeight}" rx="9" fill="${index % 2 === 0 ? accent : signal}" fill-opacity="${index % 2 === 0 ? 0.65 : 0.3}"/>`;
-  }).join('');
-
-  const orbit = `<path d="M ${width * 0.1} ${height * 0.18} C ${width * 0.24} ${height * 0.06}, ${width * 0.72} ${height * 0.1}, ${width * 0.9} ${height * 0.34}" stroke="${accent}" stroke-opacity="0.22" stroke-width="4" fill="none"/>`;
-  return bars + orbit;
-}
-
-function getHeadlineSeed(title, mod) {
-  let hash = 0;
-  for (let i = 0; i < title.length; i++) {
-    hash = title.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return Math.abs(hash) % mod;
+  const label = document.createElement('span');
+  label.className = 'image-placeholder-label';
+  label.textContent = 'No image available';
+  placeholder.appendChild(label);
+  return placeholder;
 }
 
 function createMediaImage(url, variant) {
   const img = document.createElement('img');
-  img.className = variant === 'featured' ? 'featured-media-image' : 'card-generated-image';
+  img.className = variant === 'featured' ? 'featured-media-image' : 'card-media-image';
   img.src = url;
   img.alt = '';
   img.decoding = 'async';
@@ -631,16 +407,8 @@ function buildShortDescription(description) {
   return null;
 }
 
-function trimText(text, maxLength) {
-  if (text.length <= maxLength) {
-    return text;
-  }
-
-  return text.slice(0, maxLength).trimEnd() + '…';
-}
-
 function getPreferredImageUrl(article) {
-  return article.generated_image_url || article.image_url || null;
+  return article.image_url || null;
 }
 
 export function showError(message) {

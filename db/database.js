@@ -4,7 +4,6 @@ const fs       = require('fs');
 const { cleanArticleText, cleanArticleTitle } = require('../services/textCleanup');
 
 const DATA_DIR      = path.join(__dirname, '..', 'data');
-const GENERATED_DIR = path.join(DATA_DIR, 'generated-images');
 const DB_PATH       = path.join(DATA_DIR, 'news.db');
 
 let db;
@@ -23,9 +22,8 @@ function initializeDb() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-  if (!fs.existsSync(GENERATED_DIR)) {
-    fs.mkdirSync(GENERATED_DIR, { recursive: true });
-  }
+  // Remove files left by the retired AI image-generation feature.
+  fs.rmSync(path.join(DATA_DIR, 'generated-images'), { recursive: true, force: true });
 
   db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');  // Better concurrent read performance
@@ -62,17 +60,31 @@ function initializeDb() {
       ON articles(url);
   `);
 
-  ensureColumn('articles', 'generated_image_url', 'TEXT');
-  ensureColumn('articles', 'generated_image_status', 'TEXT');
-  ensureColumn('articles', 'generated_image_generated_at', 'TEXT');
   ensureColumn('articles', 'preview_text', 'TEXT');
   ensureColumn('articles', 'preview_fetched_at', 'TEXT');
   ensureColumn('articles', 'content_html', 'TEXT');
   ensureColumn('articles', 'content_text', 'TEXT');
 
+  removeLegacyGeneratedImageColumns();
   syncSources();
   cleanupStoredArticleText();
   console.log('[db] Initialized:', DB_PATH);
+}
+
+function removeLegacyGeneratedImageColumns() {
+  const legacyColumns = [
+    'generated_image_url',
+    'generated_image_status',
+    'generated_image_generated_at',
+  ];
+
+  for (const columnName of legacyColumns) {
+    const exists = db.prepare('PRAGMA table_info(articles)').all()
+      .some((column) => column.name === columnName);
+    if (exists) {
+      db.exec(`ALTER TABLE articles DROP COLUMN ${columnName}`);
+    }
+  }
 }
 
 function ensureColumn(tableName, columnName, sqlType) {
@@ -104,7 +116,6 @@ function syncSources() {
       `);
 
       for (const source of obsoleteSources) {
-        removeGeneratedImagesForSource(source.id);
         deleteArticlesBySource.run(source.id);
         deleteSource.run(source.id);
       }
@@ -124,30 +135,6 @@ function syncSources() {
   });
 
   sync();
-}
-
-function removeGeneratedImagesForSource(sourceId) {
-  const hasGeneratedColumn = db.prepare(`PRAGMA table_info(articles)`).all()
-    .some((column) => column.name === 'generated_image_url');
-
-  if (!hasGeneratedColumn) return;
-
-  const generated = db.prepare(`
-    SELECT generated_image_url
-    FROM articles
-    WHERE source_id = ?
-      AND generated_image_url IS NOT NULL
-  `).all(sourceId);
-
-  for (const row of generated) {
-    const filename = row.generated_image_url?.split('/').pop();
-    if (!filename) continue;
-
-    const absolutePath = path.join(GENERATED_DIR, filename);
-    if (fs.existsSync(absolutePath)) {
-      fs.unlinkSync(absolutePath);
-    }
-  }
 }
 
 function cleanupStoredArticleText() {
@@ -249,4 +236,4 @@ function getDb() {
   return db;
 }
 
-module.exports = { initializeDb, upsertArticles, getDb, SOURCES, GENERATED_DIR };
+module.exports = { initializeDb, upsertArticles, getDb, SOURCES };

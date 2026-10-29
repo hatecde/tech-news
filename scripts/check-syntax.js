@@ -10,13 +10,16 @@ const files = [
   ['routes/refresh.js', false],
   ['routes/sources.js', false],
   ['services/safeFetch.js', false],
+  ['services/refreshGuard.js', false],
   ['services/feedFetcher.js', false],
   ['services/articlePreview.js', false],
   ['services/articleImageProxy.js', false],
-  ['services/imageGenerator.js', false],
   ['public/js/api.js', true],
   ['public/js/app.js', true],
   ['public/js/ui.js', true],
+  ['services/textCleanup.js', false],
+  ['services/scheduler.js', false],
+  ['scripts/check-syntax.js', false],
 ];
 
 let failed = false;

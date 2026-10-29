@@ -1,12 +1,22 @@
 const express = require('express');
-const { fetchAll, fetchOne } = require('../services/feedFetcher');
+const { fetchAll } = require('../services/feedFetcher');
+const { isUiRefreshRequest } = require('../services/refreshGuard');
 
 const router = express.Router();
 const REFRESH_COOLDOWN_MS = 60 * 1000;
 const MAX_TRACKED_CLIENTS = 1000;
 const lastRefreshAtByIp = new Map();
 
-router.post('/', async (req, res) => {
+router.post('/', (req, res, next) => {
+  if (!isUiRefreshRequest(req)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Manual refresh is only available from the TechFeed UI button.',
+    });
+  }
+
+  next();
+}, async (req, res) => {
   const now = Date.now();
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const lastRefreshAt = lastRefreshAtByIp.get(ip);
@@ -26,11 +36,10 @@ router.post('/', async (req, res) => {
     if (oldestIp) lastRefreshAtByIp.delete(oldestIp);
   }
 
-  const slug = req.body?.source || null;
   lastRefreshAtByIp.set(ip, now);
 
   try {
-    const result = slug ? await fetchOne(slug) : await fetchAll();
+    const result = await fetchAll();
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
