@@ -42,19 +42,6 @@ export function postRefresh(source = null) {
 }
 
 /**
- * Generate and cache a fallback image for an article.
- * @param {number} articleId
- * @param {{ force?: boolean }} options
- */
-export function generateArticleImage(articleId, { force = false } = {}) {
-  return request(`/api/articles/${articleId}/generate-image`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ force }),
-  });
-}
-
-/**
  * Fetch a cached or live article preview excerpt.
  * @param {number} articleId
  * @param {{ force?: boolean }} options
