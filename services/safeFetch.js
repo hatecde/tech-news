@@ -87,41 +87,48 @@ async function fetchLimited(input, {
 }
 
 function acquireRequestSlot(signal) {
-  if (signal.aborted) return Promise.reject(new Error('Outbound request timed out while queued'));
+  if (signal.aborted) {
+    return Promise.reject(new Error('Outbound request timed out while queued'));
+  }
+
   if (activeRequests < MAX_CONCURRENT_REQUESTS) {
     activeRequests += 1;
     return Promise.resolve();
   }
+
   if (requestQueue.length >= MAX_QUEUED_REQUESTS) {
     return Promise.reject(new Error('Outbound request queue is full'));
   }
 
   return new Promise((resolve, reject) => {
-    const waiter = () => {
-      signal.removeEventListener('abort', onAbort);
-      if (signal.aborted) {
-        reject(new Error('Outbound request timed out while queued'));
-        // The slot was handed to this waiter; pass it on without leaking a slot.
-        releaseRequestSlot();
-        return;
-      }
-      activeRequests += 1;
-      resolve();
-    };
-    const onAbort = () => {
+    const waiter = { signal, resolve, reject, onAbort: null };
+    waiter.onAbort = () => {
       const index = requestQueue.indexOf(waiter);
       if (index !== -1) requestQueue.splice(index, 1);
       reject(new Error('Outbound request timed out while queued'));
     };
+
     requestQueue.push(waiter);
-    signal.addEventListener('abort', onAbort, { once: true });
+    signal.addEventListener('abort', waiter.onAbort, { once: true });
   });
 }
 
 function releaseRequestSlot() {
-  const next = requestQueue.shift();
-  if (next) next();
-  else activeRequests = Math.max(0, activeRequests - 1);
+  while (requestQueue.length > 0) {
+    const next = requestQueue.shift();
+    next.signal.removeEventListener('abort', next.onAbort);
+
+    if (next.signal.aborted) {
+      next.reject(new Error('Outbound request timed out while queued'));
+      continue;
+    }
+
+    // Transfer the released slot; the active count stays unchanged.
+    next.resolve();
+    return;
+  }
+
+  activeRequests = Math.max(0, activeRequests - 1);
 }
 
 async function readLimitedBody(response, maxBytes) {
