@@ -2,14 +2,11 @@
 
 Set these variables in the Node.js process environment or your hosting provider's environment settings. The application does not automatically load `.env` files.
 
-- `OPENAI_API_KEY`: required for AI cover generation.
-- `IMAGE_GENERATION_TOKEN`: a private random secret of at least 32 characters. Required to call the image-generation API endpoint.
-- `IMAGE_GENERATION_LIMIT_PER_HOUR`: optional per-process generation-request quota; defaults to 10.
-- `MAX_CONCURRENT_IMAGE_GENERATIONS`: optional per-process concurrency limit; defaults to 2.
-- `MAX_CONCURRENT_OUTBOUND_FETCHES`: optional maximum simultaneous bounded HTTP requests; defaults to 8.
+- `PORT`: optional HTTP port; defaults to `3000`.
+- `MAX_CONCURRENT_OUTBOUND_FETCHES`: optional maximum simultaneous bounded outbound HTTP requests; defaults to `8` and is capped at `32`.
 
-AI image generation is deliberately not triggered when the normal page renders. To generate a cover manually, call `POST /api/articles/:id/generate-image` with the `x-image-generation-token` header. Keep this token server-side or in a trusted admin environment; never embed it in frontend JavaScript.
-
-The request quota, outbound concurrency limit, and generation concurrency limit are in-memory and apply to a single Node.js process. For multiple application instances, use shared rate-limit storage and a shared generation queue.
+The SQLite database is created at `data/news.db`. The app performs an initial feed fetch on startup and then refreshes the configured RSS feeds every 15 minutes. Users can also request a manual refresh through the UI button.
 
 Outbound URL checks reduce SSRF risk, but DNS validation followed by a separate HTTP connection is not a complete defense against DNS rebinding. For a public deployment, also enforce egress restrictions or use a DNS-pinned HTTP client.
+
+The manual refresh endpoint expects a same-origin JSON request with the UI action header. This helps prevent accidental and cross-origin browser requests; it is not authentication against a deliberate client that can spoof HTTP headers.

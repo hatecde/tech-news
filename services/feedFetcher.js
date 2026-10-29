@@ -252,17 +252,8 @@ async function fetchAll() {
   return { fetched: totalFetched, inserted: totalInserted, errors };
 }
 
-// Fetch a single source by slug
-async function fetchOne(slug) {
-  const db     = getDb();
-  const source = db.prepare('SELECT * FROM sources WHERE slug = ?').get(slug);
-  if (!source) throw new Error(`Unknown source slug: ${slug}`);
-  return fetchSource(source);
-}
-
 module.exports = {
   fetchAll,
-  fetchOne,
   normalizeImageUrl,
   extractImageFromHtml,
   extractImageFromSrcset,

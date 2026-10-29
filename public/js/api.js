@@ -14,12 +14,12 @@ async function request(path, options = {}) {
 
 /**
  * Fetch paginated articles.
- * @param {{ source?: string, limit?: number, offset?: number }} params
+ * @param {{ source?: string, limit?: number, offset?: number, signal?: AbortSignal }} params
  */
-export function getArticles({ source = null, limit = 50, offset = 0 } = {}) {
+export function getArticles({ source = null, limit = 50, offset = 0, signal } = {}) {
   const qs = new URLSearchParams({ limit, offset });
   if (source) qs.set('source', source);
-  return request(`/api/articles?${qs}`);
+  return request(`/api/articles?${qs}`, { signal });
 }
 
 /**
@@ -30,14 +30,16 @@ export function getSources() {
 }
 
 /**
- * Trigger an immediate RSS refresh.
- * @param {string|null} source  Optional slug to refresh only one source
+ * Trigger an immediate RSS refresh from the UI button.
  */
-export function postRefresh(source = null) {
+export function postRefresh() {
   return request('/api/refresh', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(source ? { source } : {}),
+    headers: {
+      'Content-Type': 'application/json',
+      'X-TechFeed-Refresh-Action': 'ui-button',
+    },
+    body: JSON.stringify({}),
   });
 }
 
