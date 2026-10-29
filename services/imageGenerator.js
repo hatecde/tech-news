@@ -9,15 +9,29 @@ const DEFAULT_SIZE = process.env.OPENAI_IMAGE_SIZE || '1536x1024';
 const DEFAULT_QUALITY = process.env.OPENAI_IMAGE_QUALITY || 'low';
 
 const inFlight = new Map();
+const failedGenerationAt = new Map();
+const FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
+const MAX_CONCURRENT_GENERATIONS = boundedInteger(
+  process.env.MAX_CONCURRENT_IMAGE_GENERATIONS, 2, 1, 8
+);
+let activeGenerations = 0;
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
 
 async function generateArticleImage(articleId, { force = false } = {}) {
-  if (!force && inFlight.has(articleId)) {
-    return inFlight.get(articleId);
+  if (inFlight.has(articleId)) return inFlight.get(articleId);
+  if (activeGenerations >= MAX_CONCURRENT_GENERATIONS) {
+    throw new Error('Image generation capacity reached');
   }
 
-  const promise = generateArticleImageInternal(articleId, { force })
-    .finally(() => inFlight.delete(articleId));
-
+  activeGenerations += 1;
+  const promise = generateArticleImageInternal(articleId, { force }).finally(() => {
+    inFlight.delete(articleId);
+    activeGenerations -= 1;
+  });
   inFlight.set(articleId, promise);
   return promise;
 }
@@ -56,6 +70,11 @@ async function generateArticleImageInternal(articleId, { force = false } = {}) {
     throw new Error('OPENAI_API_KEY is not set');
   }
 
+  const lastFailureAt = failedGenerationAt.get(articleId);
+  if (!force && lastFailureAt && Date.now() - lastFailureAt < FAILURE_COOLDOWN_MS) {
+    throw new Error('Image generation is cooling down after a recent failure');
+  }
+
   db.prepare(`
     UPDATE articles
     SET generated_image_status = ?, generated_image_generated_at = NULL
@@ -64,7 +83,15 @@ async function generateArticleImageInternal(articleId, { force = false } = {}) {
 
   try {
     const prompt = buildArticleImagePrompt(article);
-    const imageBase64 = await requestImageGeneration(prompt);
+    let imageBase64;
+    try {
+      imageBase64 = await requestImageGeneration(prompt);
+    } catch (error) {
+      failedGenerationAt.set(articleId, Date.now());
+      throw error;
+    }
+
+    const previousGeneratedUrl = article.generated_image_url;
     const filename = `article-${articleId}-${Date.now()}.jpg`;
     const absolutePath = path.join(GENERATED_DIR, filename);
     const publicPath = `/generated-images/${filename}`;
@@ -79,6 +106,11 @@ async function generateArticleImageInternal(articleId, { force = false } = {}) {
         generated_image_generated_at = ?
       WHERE id = ?
     `).run(publicPath, 'ready', new Date().toISOString(), articleId);
+
+    failedGenerationAt.delete(articleId);
+    if (previousGeneratedUrl && previousGeneratedUrl !== publicPath) {
+      removeGeneratedImageFile(previousGeneratedUrl);
+    }
 
     return {
       generated_image_url: publicPath,
@@ -219,6 +251,21 @@ function inferSubjectHint(title, description = '') {
 
 function containsAny(text, keywords) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function removeGeneratedImageFile(publicPath) {
+  if (typeof publicPath !== 'string' || !publicPath.startsWith('/generated-images/')) return;
+
+  const filename = path.basename(publicPath);
+  const absolutePath = path.resolve(GENERATED_DIR, filename);
+  const generatedRoot = path.resolve(GENERATED_DIR) + path.sep;
+  if (!absolutePath.startsWith(generatedRoot)) return;
+
+  try {
+    fs.unlinkSync(absolutePath);
+  } catch (_) {
+    // Best-effort cleanup.
+  }
 }
 
 function generatedFileExists(publicPath) {

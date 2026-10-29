@@ -1,4 +1,5 @@
 const { getDb } = require('../db/database');
+const { fetchLimited } = require('./safeFetch');
 const {
   cleanArticleText,
   decodeHtmlEntities,
@@ -95,16 +96,21 @@ async function fetchArticlePreviewText(url, article) {
   const candidates = [];
 
   try {
-    const response = await fetch(url, {
+    const result = await fetchLimited(url, {
       headers: {
         'User-Agent': 'TechFeedAggregator/1.0 (+https://github.com/techfeed)',
         'Accept-Language': 'en-US,en;q=0.9',
       },
+      timeoutMs: 8000,
+      maxBytes: 1_500_000,
+      acceptContentTypes: ['text/html', 'application/xhtml+xml'],
     });
 
-    if (response.ok) {
-      const html = await response.text();
-      candidates.push(...extractCandidateTextsFromHtml(html, 'live-page'));
+    if (result.ok) {
+      candidates.push(...extractCandidateTextsFromHtml(
+        result.body.toString('utf8'),
+        'live-page'
+      ));
     }
   } catch (_) {
     // Fall back to stored feed-backed content below.

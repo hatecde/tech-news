@@ -23,6 +23,11 @@ app.use('/api/articles', require('./routes/articles'));
 app.use('/api/sources',  require('./routes/sources'));
 app.use('/api/refresh',  require('./routes/refresh'));
 
+// Unknown API endpoints should return JSON instead of the SPA HTML.
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: 'API endpoint not found' });
+});
+
 // SPA fallback — serve index.html for any non-API, non-static route
 // Express 5 requires named wildcard parameters (path-to-regexp v8+)
 app.get('/{*splat}', (req, res) => {

@@ -1,5 +1,4 @@
 import {
-  generateArticleImage as requestGeneratedArticleImage,
   getArticlePreview as requestArticlePreview,
 } from './api.js';
 
@@ -15,7 +14,6 @@ export function sourceColor(slug) {
   return `hsl(${hue}, 62%, 48%)`;
 }
 
-const articleImageRequests = new Map();
 let activePreviewArticleId = null;
 
 export function formatTimeAgo(isoString) {
@@ -349,30 +347,18 @@ function buildCard(article, onArticleClick) {
 
 function makeCardMedia(article) {
   const initialUrl = getPreferredImageUrl(article);
-  if (initialUrl) {
-    const wrap = document.createElement('div');
-    wrap.className = 'card-image-wrap';
+  if (!initialUrl) return makeGeneratedMediaWrap(article);
 
-    const img = createMediaImage(initialUrl, 'card');
+  const wrap = document.createElement('div');
+  wrap.className = 'card-image-wrap';
+  const img = createMediaImage(initialUrl, 'card');
 
-    img.onerror = () => {
-      const placeholder = makeGeneratedMediaImage(article, 'card');
-      wrap.replaceChildren(placeholder);
-      requestArticleImageUpgrade(article, placeholder, {
-        variant: 'card',
-        force: initialUrl === article.generated_image_url,
-      });
-    };
+  img.onerror = () => {
+    // Use the locally generated SVG artwork; don't trigger paid image generation.
+    wrap.replaceChildren(makeGeneratedMediaImage(article, 'card'));
+  };
 
-    wrap.appendChild(img);
-    return wrap;
-  }
-
-  const wrap = makeGeneratedMediaWrap(article);
-  const placeholder = wrap.querySelector('img');
-  if (placeholder) {
-    requestArticleImageUpgrade(article, placeholder, { variant: 'card' });
-  }
+  wrap.appendChild(img);
   return wrap;
 }
 
@@ -385,24 +371,10 @@ function makeGeneratedMediaWrap(article) {
 
 function makeFeaturedMediaContent(article) {
   const initialUrl = getPreferredImageUrl(article);
-
-  if (!initialUrl) {
-    const placeholder = makeGeneratedMediaImage(article, 'featured');
-    requestArticleImageUpgrade(article, placeholder, { variant: 'featured' });
-    return placeholder;
-  }
+  if (!initialUrl) return makeGeneratedMediaImage(article, 'featured');
 
   const img = createMediaImage(initialUrl, 'featured');
-
-  img.onerror = () => {
-    const placeholder = makeGeneratedMediaImage(article, 'featured');
-    img.replaceWith(placeholder);
-    requestArticleImageUpgrade(article, placeholder, {
-      variant: 'featured',
-      force: initialUrl === article.generated_image_url,
-    });
-  };
-
+  img.onerror = () => img.replaceWith(makeGeneratedMediaImage(article, 'featured'));
   return img;
 }
 
@@ -669,40 +641,6 @@ function trimText(text, maxLength) {
 
 function getPreferredImageUrl(article) {
   return article.generated_image_url || article.image_url || null;
-}
-
-function requestArticleImageUpgrade(article, img, { variant, force = false } = {}) {
-  if (!article?.id || !img) return;
-
-  const cacheKey = `${article.id}:${force ? 'force' : 'normal'}`;
-  if (!articleImageRequests.has(cacheKey)) {
-    articleImageRequests.set(
-      cacheKey,
-      requestGeneratedArticleImage(article.id, { force })
-        .catch((error) => {
-          articleImageRequests.delete(cacheKey);
-          throw error;
-        })
-    );
-  }
-
-  articleImageRequests.get(cacheKey)
-    .then((result) => {
-      const generatedUrl = result?.generated_image_url;
-      if (!generatedUrl || !img.isConnected) return;
-
-      img.src = generatedUrl;
-      img.onerror = () => {
-        if (!force) {
-          const fallback = makeGeneratedMediaImage(article, variant);
-          img.replaceWith(fallback);
-          requestArticleImageUpgrade(article, fallback, { variant, force: true });
-        }
-      };
-    })
-    .catch((error) => {
-      console.warn('[ui] generated image unavailable:', error.message);
-    });
 }
 
 export function showError(message) {
