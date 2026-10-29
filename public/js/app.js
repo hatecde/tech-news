@@ -28,6 +28,8 @@ const state = {
 };
 
 let paginationMessageTimer = null;
+let articleAbortController = null;
+let articleRequestId = 0;
 
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
@@ -89,9 +91,14 @@ async function loadArticles(reset = false) {
     state.offset = 0;
     setLoadMoreVisible(false);
     setLoadMoreLoading(false);
+    articleAbortController?.abort();
+  } else if (state.isLoading) {
+    return;
   }
 
-  if (state.isLoading) return;
+  const requestId = ++articleRequestId;
+  const controller = new AbortController();
+  articleAbortController = controller;
   state.isLoading = true;
 
   try {
@@ -99,8 +106,10 @@ async function loadArticles(reset = false) {
       source: state.activeSource,
       limit: state.limit,
       offset: state.offset,
+      signal: controller.signal,
     });
 
+    if (requestId !== articleRequestId) return;
     state.total = total;
 
     if (reset) {
@@ -120,7 +129,10 @@ async function loadArticles(reset = false) {
       });
 
       if (articles.length > 0) {
-        showPaginationMessage(`Loaded ${articles.length} more ${articles.length === 1 ? 'story' : 'stories'}`, 2200);
+        showPaginationMessage(
+          `Loaded ${articles.length} more ${articles.length === 1 ? 'story' : 'stories'}`,
+          2200
+        );
       } else {
         clearPaginationMessageTimer();
         state.paginationMessage = null;
@@ -129,17 +141,20 @@ async function loadArticles(reset = false) {
 
     hideError();
     updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
-
     setLoadMoreVisible(canLoadMore());
   } catch (err) {
+    if (err.name === 'AbortError' || requestId !== articleRequestId) return;
     console.error('[app] loadArticles error:', err);
     clearPaginationMessageTimer();
     state.paginationMessage = null;
     showError('Failed to load articles: ' + err.message);
     updateOverview(getOverviewState(), { paginationMessage: state.paginationMessage });
   } finally {
-    state.isLoading = false;
-    setLoadMoreLoading(false);
+    if (requestId === articleRequestId) {
+      state.isLoading = false;
+      articleAbortController = null;
+      setLoadMoreLoading(false);
+    }
   }
 }
 
